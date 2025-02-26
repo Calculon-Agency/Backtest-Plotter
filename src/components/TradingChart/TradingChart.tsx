@@ -22,6 +22,7 @@ import { CandlestickController, CandlestickElement } from 'chartjs-chart-financi
 import zoomPlugin from 'chartjs-plugin-zoom';
 import 'chartjs-adapter-date-fns';
 import { enUS } from 'date-fns/locale';
+import annotationPlugin from 'chartjs-plugin-annotation';
 
 
 // Register ChartJS components
@@ -37,7 +38,8 @@ ChartJS.register(
   Legend,
   CandlestickController,
   CandlestickElement,
-  zoomPlugin
+  zoomPlugin,
+  annotationPlugin
 );
 
 const DEFAULT_HEIGHT = 800;
@@ -178,6 +180,56 @@ const TradingChart = () => {
     }
   };
 
+  // Update price chart options to include box annotation and point annotations
+  const priceChartOptions: ChartOptions = {
+    ...baseOptions,
+    plugins: {
+      ...baseOptions.plugins,
+      annotation: {
+        annotations: {
+          box1: {
+            type: 'box',
+            xMin: new Date('2024-12-01').getTime(),
+            xMax: new Date('2024-12-31').getTime(),
+            backgroundColor: 'rgba(255, 235, 59, 0.2)',
+            borderColor: 'rgba(255, 235, 59, 0.8)',
+            borderWidth: 1,
+          },
+          buySignal: {
+            type: 'line',
+            xMin: candlesticks[30].time,
+            xMax: candlesticks[30].time,
+            yMin: candlesticks[30].low * 0.99,
+            yMax: candlesticks[30].high,
+            borderColor: '#4CAF50',
+            borderWidth: 2,
+            label: {
+              content: 'BUY',
+              display: true,
+              position: 'start',
+              backgroundColor: '#4CAF50'
+            }
+          },
+          sellSignal: {
+            type: 'line',
+            xMin: candlesticks[60].time,
+            xMax: candlesticks[60].time,
+            yMin: candlesticks[60].low,
+            yMax: candlesticks[60].high * 1.01,
+            borderColor: '#FF5252',
+            borderWidth: 2,
+            label: {
+              content: 'SELL',
+              display: true,
+              position: 'end',
+              backgroundColor: '#FF5252'
+            }
+          }
+        }
+      }
+    }
+  };
+
   // Update synchronization
   useEffect(() => {
     const charts = [priceChartRef.current, volumeChartRef.current, rsiChartRef.current, macdChartRef.current].filter(Boolean);
@@ -219,7 +271,7 @@ const TradingChart = () => {
       flexDirection: 'column',
     }}>
       <div style={{ flex: 3, padding: '10px' }}>
-        <Chart ref={priceChartRef} type="candlestick" data={priceData} options={baseOptions} />
+        <Chart ref={priceChartRef} type="candlestick" data={priceData} options={priceChartOptions} />
       </div>
       <div style={{ flex: 1, padding: '10px' }}>
         <Chart ref={volumeChartRef} type="bar" data={volumeData} options={baseOptions} />
