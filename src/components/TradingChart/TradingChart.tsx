@@ -21,7 +21,8 @@ import {
 import { RectanglePlugin, Rectangle, RectangleOptions } from './Rectangular';
 
 const DEFAULT_HEIGHT = 800;
-const AVAILABLE_COINS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'XRPUSDT', 'LTCUSDT', 'EOSUSDT', 'NEOUSDT', 'QTUMUSDT'];
+// Use the symbol list fetched from the API
+const DEFAULT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'XRPUSDT', 'LTCUSDT', 'EOSUSDT', 'NEOUSDT', 'QTUMUSDT'];
 
 // Box annotation interface
 interface BoxAnnotation {
@@ -45,10 +46,11 @@ interface CandlestickData {
   DSS_2H: number | null;
   DSS_4H: number | null;
   DSS_8H: number | null;
-  DSS_DAILY: number;
-  DSS_3D: number;
-  DSS_UP: number;
-  DSS_DOWN: number;
+  DSS_DAILY: number | null;
+  DSS_1D?: number; // From API
+  DSS_3D: number | null;
+  DSS_UP: number | null;
+  DSS_DOWN: number | null;
   buy?: boolean;
   sell?: boolean;
   // Also include uppercase versions for API compatibility
@@ -64,6 +66,7 @@ const TradingChart = () => {
   const [error, setError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<string>('');
   const [boxAnnotations, setBoxAnnotations] = useState<BoxAnnotation[]>([]);
+  const [availableSymbols, setAvailableSymbols] = useState<string[]>(DEFAULT_SYMBOLS);
   
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const volumeContainerRef = useRef<HTMLDivElement>(null);
@@ -199,26 +202,92 @@ const TradingChart = () => {
     // Add a message to the debug info
     setDebugInfo(prevInfo => `${prevInfo} | Added box annotations`);
   };
+  
+  // Function to fetch available symbols from the API
+  useEffect(() => {
+    const fetchSymbols = async () => {
+      try {
+        const response = await fetch('https://api.coinchart.fun/symbol_list');
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const symbolData = await response.json();
+        // Extract unique symbols from the binance exchange
+        const binanceSymbols = symbolData
+          .filter((item: any) => item.exchange === 'binance')
+          .map((item: any) => item.symbol);
+        
+        // Only update if we have symbols
+        if (binanceSymbols.length > 0) {
+          setAvailableSymbols(binanceSymbols);
+          // Set default selected coin if current selection is not available
+          if (!binanceSymbols.includes(selectedCoin)) {
+            setSelectedCoin(binanceSymbols[0]);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching symbols:', error);
+        // Keep using default symbols if API fails
+      }
+    };
+    
+    fetchSymbols();
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await fetch(`./assets/samples/${selectedCoin}.json`);
+        setDebugInfo('Fetching data...');
+        
+        // Extract symbol without USDT suffix for the API
+        const symbol = selectedCoin.replace('USDT', '').toLowerCase();
+        const apiUrl = `https://api.coinchart.fun/candle_data/${symbol}`;
+        
+        console.log(`Fetching data from: ${apiUrl}`);
+        const response = await fetch(apiUrl);
+        
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
+        
         const data = await response.json();
         
-        // Check for buy/sell signals in data
-        const buySignals = data.filter((d: any) => d.BUY === true).length;
-        const sellSignals = data.filter((d: any) => d.SELL === true).length;
-        setDebugInfo(`Found ${buySignals} buy signals and ${sellSignals} sell signals`);
+        // Normalize data structure if needed
+        const normalizedData = data.map((d: any) => ({
+          time: d.time,
+          open: d.open,
+          high: d.high,
+          low: d.low,
+          close: d.close,
+          volume: d.volume,
+          // Map DSS fields, ensuring API naming differences are handled
+          DSS_UP: d.DSS_UP !== undefined ? d.DSS_UP : 80,
+          DSS_DOWN: d.DSS_DOWN !== undefined ? d.DSS_DOWN : 20,
+          DSS_12H: d.DSS_12H,
+          DSS_2H: d.DSS_2H,
+          DSS_4H: d.DSS_4H,
+          DSS_8H: d.DSS_8H,
+          DSS_DAILY: d.DSS_1D || d.DSS_DAILY,
+          DSS_3D: d.DSS_3D,
+          // Buy/Sell signals
+          BUY: d.BUY === true,
+          SELL: d.SELL === true,
+          // Include all other properties
+          ...d
+        }));
         
-        setChartData(data);
+        // Check for buy/sell signals in data
+        const buySignals = normalizedData.filter((d: any) => d.BUY === true).length;
+        const sellSignals = normalizedData.filter((d: any) => d.SELL === true).length;
+        setDebugInfo(`Loaded from API: ${buySignals} buy signals and ${sellSignals} sell signals`);
+        
+        setChartData(normalizedData);
         setError(null);
       } catch (error) {
         console.error('Error loading data:', error);
-        setError(`Failed to load data: ${error.message}`);
+        setError(`Failed to load data from API: ${error.message}. Please try another symbol or try again later.`);
+        setChartData([]);
       }
     };
     
@@ -404,7 +473,7 @@ const TradingChart = () => {
     const dssFields = ['DSS_UP', 'DSS_DOWN', 'DSS_2H', 'DSS_4H', 'DSS_8H', 'DSS_12H', 'DSS_DAILY', 'DSS_3D'];
     dssFields.forEach(field => {
       const data = chartData
-        .filter(d => d[field as keyof CandlestickData] !== null)
+        .filter(d => d[field as keyof CandlestickData] !== null && d[field as keyof CandlestickData] !== undefined)
         .map(d => ({
           time: d.time / 1000 as Time,
           value: d[field as keyof CandlestickData] as number,
@@ -419,6 +488,36 @@ const TradingChart = () => {
     }, 500);
 
   }, [chartData]);
+
+  // Function to fetch rectangles from API (for future implementation)
+  const fetchRectanglesFromAPI = async () => {
+    try {
+      // This is a placeholder for future rectangle API integration
+      // In the future, you would fetch data from your rectangle API here
+      
+      // Example of what the API response might look like:
+      /*
+      const response = await fetch('your-rectangle-api-endpoint');
+      const data = await response.json();
+      
+      if (rectanglePluginRef.current && chartRef.current && data.rectangles) {
+        // Get price range for better positioning
+        const minPrice = Math.min(...chartData.map(d => d.low));
+        const maxPrice = Math.max(...chartData.map(d => d.high));
+        
+        rectanglePluginRef.current.setPriceRange(minPrice, maxPrice);
+        rectanglePluginRef.current.setRectangles(data.rectangles);
+      }
+      */
+      
+      console.log('Rectangle API fetch placeholder - using default rectangles for now');
+      
+      // For now, just trigger the default box annotations
+      addBoxAnnotations();
+    } catch (error) {
+      console.error('Error fetching rectangles:', error);
+    }
+  };
 
   if (error) {
     return (
@@ -450,7 +549,7 @@ const TradingChart = () => {
             fontSize: '14px'
           }}
         >
-          {AVAILABLE_COINS.map(coin => (
+          {availableSymbols.map(coin => (
             <option key={coin} value={coin}>{coin}</option>
           ))}
         </select>
