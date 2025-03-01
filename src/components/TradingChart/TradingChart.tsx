@@ -67,6 +67,13 @@ const TradingChart = () => {
   const [debugInfo, setDebugInfo] = useState<string>('');
   const [boxAnnotations, setBoxAnnotations] = useState<BoxAnnotation[]>([]);
   const [availableSymbols, setAvailableSymbols] = useState<string[]>(DEFAULT_SYMBOLS);
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
+  
+  // Filter symbols based on search term
+  const filteredSymbols = availableSymbols.filter(symbol => 
+    symbol.toLowerCase().includes(searchTerm.toLowerCase())
+  );
   
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const volumeContainerRef = useRef<HTMLDivElement>(null);
@@ -537,22 +544,89 @@ const TradingChart = () => {
   return (
     <div style={{ width: '100%', height: '100%', backgroundColor: '#131722', overflow: 'hidden', position: 'relative' }}>
       <div style={{ padding: '10px', backgroundColor: '#131722', borderBottom: '1px solid #485c7b', display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
-        <select 
-          value={selectedCoin}
-          onChange={(e) => setSelectedCoin(e.target.value)}
-          style={{
-            backgroundColor: '#2A2E39',
-            color: '#d1d4dc',
-            padding: '8px',
-            border: '1px solid #485c7b',
-            borderRadius: '4px',
-            fontSize: '14px'
-          }}
-        >
-          {availableSymbols.map(coin => (
-            <option key={coin} value={coin}>{coin}</option>
-          ))}
-        </select>
+        <div style={{ position: 'relative', minWidth: '200px' }}>
+          <div 
+            style={{
+              backgroundColor: '#2A2E39',
+              color: '#d1d4dc',
+              padding: '8px',
+              border: '1px solid #485c7b',
+              borderRadius: '4px',
+              fontSize: '14px',
+              cursor: 'pointer',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}
+            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+          >
+            <span>{selectedCoin}</span>
+            <span style={{ marginLeft: '8px' }}>▼</span>
+          </div>
+          
+          {isDropdownOpen && (
+            <div style={{
+              position: 'absolute',
+              top: '100%',
+              left: 0,
+              width: '100%',
+              backgroundColor: '#2A2E39',
+              border: '1px solid #485c7b',
+              borderRadius: '0 0 4px 4px',
+              zIndex: 10,
+              maxHeight: '300px',
+              overflowY: 'auto'
+            }}>
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search coins..."
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  backgroundColor: '#1E222D',
+                  color: '#d1d4dc',
+                  border: 'none',
+                  borderBottom: '1px solid #485c7b',
+                  fontSize: '14px',
+                  outline: 'none'
+                }}
+                onClick={(e) => e.stopPropagation()}
+              />
+              
+              <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                {filteredSymbols.length > 0 ? (
+                  filteredSymbols.map(coin => (
+                    <div
+                      key={coin}
+                      style={{
+                        padding: '8px',
+                        cursor: 'pointer',
+                        backgroundColor: selectedCoin === coin ? '#364156' : 'transparent',
+                        color: '#d1d4dc',
+                        borderBottom: '1px solid #343a45',
+                        fontSize: '14px'
+                      }}
+                      onClick={() => {
+                        setSelectedCoin(coin);
+                        setIsDropdownOpen(false);
+                        setSearchTerm('');
+                      }}
+                    >
+                      {coin}
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ padding: '8px', color: '#758696', fontSize: '14px' }}>
+                    No coins found
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+        
         <span style={{ marginLeft: '10px', color: '#d1d4dc' }}>
           {chartData.length > 0 ? `Loaded ${chartData.length} records` : 'Loading...'}
         </span>
