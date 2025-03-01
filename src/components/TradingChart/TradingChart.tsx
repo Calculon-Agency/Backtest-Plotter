@@ -15,11 +15,24 @@ import {
   LineSeries,
   MouseEventParams,
   SeriesMarker,
-  createSeriesMarkers
+  createSeriesMarkers,
+  PriceScaleMode
 } from 'lightweight-charts';
+import { RectanglePlugin, Rectangle, RectangleOptions } from './Rectangular';
 
 const DEFAULT_HEIGHT = 800;
 const AVAILABLE_COINS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'XRPUSDT', 'LTCUSDT', 'EOSUSDT', 'NEOUSDT', 'QTUMUSDT'];
+
+// Box annotation interface
+interface BoxAnnotation {
+  xMin: number; // timestamp in ms
+  xMax: number; // timestamp in ms
+  yMin?: number; // price level (optional)
+  yMax?: number; // price level (optional)
+  backgroundColor: string;
+  borderColor: string;
+  borderWidth: number;
+}
 
 interface CandlestickData {
   time: number;
@@ -50,6 +63,7 @@ const TradingChart = () => {
   const [chartData, setChartData] = useState<CandlestickData[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<string>('');
+  const [boxAnnotations, setBoxAnnotations] = useState<BoxAnnotation[]>([]);
   
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const volumeContainerRef = useRef<HTMLDivElement>(null);
@@ -62,6 +76,9 @@ const TradingChart = () => {
   const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const dssSeriesRefs = useRef<{[key: string]: ISeriesApi<'Line'> | null}>({});
+  
+  // Reference to the rectangle plugin
+  const rectanglePluginRef = useRef<RectanglePlugin | null>(null);
 
   // Function to manually add buy/sell markers to the chart
   const addBuySellMarkers = () => {
@@ -94,36 +111,107 @@ const TradingChart = () => {
       }
     });
     
-    console.log(`Created ${markers.length} markers for buy/sell signals`);
     
     // Set the markers on the candlestick series
     if (markers.length > 0 && candlestickSeriesRef.current) {
       try {
         // Use createSeriesMarkers instead of setMarkers
         createSeriesMarkers(candlestickSeriesRef.current, markers);
-        console.log('Markers set successfully');
       } catch (err) {
         console.error('Error setting markers:', err);
       }
     }
   };
 
+  // Function to add box annotations to the chart
+  const addBoxAnnotations = () => {
+    console.log('Adding box annotations');
+    if (!chartRef.current || !candlestickSeriesRef.current || !chartData.length) {
+      console.error('Cannot add box annotations - chart or data not ready');
+      return;
+    }
+    
+    // Find current visible data to determine appropriate dates
+    // Use the most recent 30% of the dataset for annotations
+    const sortedData = [...chartData].sort((a, b) => a.time - b.time);
+    const startIdx = Math.floor(sortedData.length * 0.6);
+    const midIdx = Math.floor(sortedData.length * 0.75);
+    const endIdx = sortedData.length - 1;
+    
+    // Get actual timestamps from data
+    const startTime = sortedData[startIdx]?.time || Date.now();
+    const midTime = sortedData[midIdx]?.time || Date.now();
+    const endTime = sortedData[endIdx]?.time || Date.now();
+    
+    console.log(`Using time range from data: ${new Date(startTime).toISOString()} to ${new Date(endTime).toISOString()}`);
+    
+    // Calculate price ranges from visible data
+    const minPrice = Math.min(...sortedData.slice(startIdx).map(d => d.low));
+    const maxPrice = Math.max(...sortedData.slice(startIdx).map(d => d.high));
+    const midPrice = (minPrice + maxPrice) / 2;
+    
+    console.log(`Price range in visible data: ${minPrice} - ${maxPrice}`);
+    
+    // Create Rectangle objects for our plugin
+    const rectangles: Rectangle[] = [
+      {
+        xMin: startTime,
+        xMax: midTime,
+        yMin: minPrice,
+        yMax: midPrice,
+        options: {
+          fillColor: '#FF0000',
+          fillOpacity: 0.3,
+          borderColor: '#FF0000',
+          borderWidth: 2,
+          borderStyle: LineStyle.Solid,
+          borderVisible: true,
+        }
+      },
+      {
+        xMin: midTime,
+        xMax: endTime,
+        yMin: midPrice,
+        yMax: maxPrice,
+        options: {
+          fillColor: '#0000FF',
+          fillOpacity: 0.3,
+          borderColor: '#0000FF',
+          borderWidth: 2,
+          borderStyle: LineStyle.Dashed,
+          borderVisible: true,
+        }
+      }
+    ];
+    
+    // Create a new RectanglePlugin if it doesn't exist yet
+    if (!rectanglePluginRef.current && chartRef.current) {
+      rectanglePluginRef.current = new RectanglePlugin(chartRef.current, { min: minPrice, max: maxPrice });
+    }
+    
+    // Update price range and set rectangles
+    if (rectanglePluginRef.current) {
+      rectanglePluginRef.current.setPriceRange(minPrice, maxPrice);
+      rectanglePluginRef.current.setRectangles(rectangles);
+      console.log('Added rectangles to the chart:', rectangles.length);
+    }
+    
+    // Add a message to the debug info
+    setDebugInfo(prevInfo => `${prevInfo} | Added box annotations`);
+  };
+
   useEffect(() => {
     const fetchData = async () => {
       try {
-        console.log('Fetching data for:', selectedCoin);
         const response = await fetch(`./assets/samples/${selectedCoin}.json`);
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
-        console.log('Data sample:', data[0]);
-        console.log('Data loaded:', data.length, 'records');
         
         // Check for buy/sell signals in data
         const buySignals = data.filter((d: any) => d.BUY === true).length;
         const sellSignals = data.filter((d: any) => d.SELL === true).length;
-        console.log(`Found ${buySignals} buy signals and ${sellSignals} sell signals`);
         setDebugInfo(`Found ${buySignals} buy signals and ${sellSignals} sell signals`);
         
         setChartData(data);
@@ -157,6 +245,10 @@ const TradingChart = () => {
       },
       rightPriceScale: {
         borderColor: '#485c7b',
+        scaleMargins: {
+          top: 0.1,
+          bottom: 0.1,
+        },
       },
       crosshair: {
         mode: 1,
@@ -277,6 +369,9 @@ const TradingChart = () => {
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      if (rectanglePluginRef.current) {
+        rectanglePluginRef.current.destroy();
+      }
       mainChart.remove();
       volumeChart.remove();
       dssChart.remove();
@@ -320,6 +415,7 @@ const TradingChart = () => {
     // Add markers after a short delay to ensure chart is ready
     setTimeout(() => {
       addBuySellMarkers();
+      addBoxAnnotations(); // Add box annotations
     }, 500);
 
   }, [chartData]);
@@ -379,6 +475,21 @@ const TradingChart = () => {
           }}
         >
           Refresh Markers
+        </button>
+        <button 
+          onClick={addBoxAnnotations}
+          style={{
+            marginLeft: '10px',
+            backgroundColor: '#2A2E39',
+            color: '#d1d4dc',
+            padding: '8px',
+            border: '1px solid #485c7b',
+            borderRadius: '4px',
+            fontSize: '14px',
+            cursor: 'pointer'
+          }}
+        >
+          Add Box Annotations
         </button>
       </div>
       <div style={{
